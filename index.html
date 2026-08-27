@@ -124,6 +124,84 @@
   }
 
   /* 월 네비게이션 */
+  /* 기기 소유자 선택 모달 */
+  .owner-modal{
+    position:fixed;
+    inset:0;
+    background:rgba(20,20,20,0.45);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:100;
+    padding:20px;
+  }
+  .owner-modal-box{
+    background:var(--paper);
+    border-radius:10px;
+    padding:26px 22px;
+    max-width:320px;
+    width:100%;
+    text-align:center;
+    box-shadow:0 20px 45px -15px rgba(0,0,0,0.3);
+  }
+  .owner-modal-title{
+    font-family:'Noto Serif KR',serif;
+    font-weight:700;
+    font-size:17px;
+    color:var(--ink);
+    margin:0 0 6px;
+  }
+  .owner-modal-sub{
+    font-size:12.5px;
+    color:var(--muted);
+    margin:0 0 20px;
+  }
+  .owner-modal-btns{
+    display:flex;
+    gap:10px;
+  }
+  .owner-modal-btns button{
+    flex:1;
+    padding:12px 8px;
+    border:1px solid var(--line);
+    background:var(--paper-dark);
+    border-radius:8px;
+    font-size:14px;
+    font-weight:700;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .owner-modal-btns button:hover{ border-color:var(--ink-light); }
+
+  /* 알림 배너 */
+  .notify-banner{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    background:rgba(201,69,122,0.08);
+    border:1px solid rgba(201,69,122,0.25);
+    color:var(--expense-dark);
+    padding:11px 14px;
+    border-radius:8px;
+    font-size:13px;
+    margin-bottom:18px;
+    animation:bannerIn .25s ease;
+  }
+  .notify-banner button{
+    background:none;
+    border:none;
+    color:var(--expense-dark);
+    font-size:16px;
+    cursor:pointer;
+    line-height:1;
+    flex:0 0 auto;
+  }
+  @keyframes bannerIn{
+    from{ opacity:0; transform:translateY(-6px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+
   .month-nav{
     display:flex;
     align-items:center;
@@ -320,6 +398,22 @@
   }
   .row .tag.income{ color:var(--income); background:rgba(60,110,71,0.1); }
   .row .tag.expense{ color:var(--expense-dark); background:rgba(201,69,122,0.1); }
+  .author-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    font-size:10px;
+    font-weight:700;
+    color:#fff;
+    margin-left:6px;
+    vertical-align:middle;
+    flex:0 0 auto;
+  }
+  .author-badge.author-반석{ background:#454b58; }
+  .author-badge.author-종애{ background:#c9457a; }
   .row .amount{
     font-family:'Roboto Mono',monospace;
     text-align:right;
@@ -401,6 +495,17 @@
 </head>
 <body>
 
+<div class="owner-modal" id="ownerModal" style="display:none;">
+  <div class="owner-modal-box">
+    <p class="owner-modal-title">이 폰은 누구 것인가요?</p>
+    <p class="owner-modal-sub">상대방이 새 내역을 등록하면 알려드릴게요</p>
+    <div class="owner-modal-btns">
+      <button data-owner="반석">반석</button>
+      <button data-owner="종애">종애공주님</button>
+    </div>
+  </div>
+</div>
+
 <div class="passbook">
   <div class="binding"></div>
   <div class="content">
@@ -413,6 +518,11 @@
       </div>
       <div class="today" id="todayLabel"></div>
     </header>
+
+    <div class="notify-banner" id="notifyBanner" style="display:none;">
+      <span id="notifyText"></span>
+      <button id="notifyClose" aria-label="닫기">×</button>
+    </div>
 
     <div class="month-nav">
       <div class="month-nav-main">
@@ -466,6 +576,13 @@
       <div class="field">
         <label for="fAmount">금액(원)</label>
         <input id="fAmount" type="number" placeholder="0" min="0">
+      </div>
+      <div class="field">
+        <label for="fAuthor">작성자</label>
+        <select id="fAuthor">
+          <option value="반석">반석</option>
+          <option value="종애">종애공주님</option>
+        </select>
       </div>
       <div class="field">
         <label for="fMemo">메모</label>
@@ -539,6 +656,67 @@
   };
   const TABLE_URL = `${SUPABASE_URL}/rest/v1/ledger_entries`;
 
+  // ── 기기 소유자 (알림 대상 구분용) ──
+  const OWNER_KEY = 'ledger-device-owner';
+  const LASTSEEN_KEY = 'ledger-last-seen';
+
+  function getDeviceOwner(){
+    return localStorage.getItem(OWNER_KEY);
+  }
+
+  function initOwnerModal(){
+    const owner = getDeviceOwner();
+    if(owner) return;
+    const modal = document.getElementById('ownerModal');
+    modal.style.display = 'flex';
+    modal.querySelectorAll('button[data-owner]').forEach(btn=>{
+      btn.addEventListener('click', () => {
+        localStorage.setItem(OWNER_KEY, btn.dataset.owner);
+        localStorage.setItem(LASTSEEN_KEY, new Date().toISOString());
+        modal.style.display = 'none';
+      });
+    });
+  }
+
+  function checkNewEntries(fetchedItems){
+    const owner = getDeviceOwner();
+    if(!owner) return; // 소유자 선택 전에는 알림 판단 안 함
+
+    const lastSeenRaw = localStorage.getItem(LASTSEEN_KEY);
+    const lastSeen = lastSeenRaw ? new Date(lastSeenRaw) : null;
+    const nowTime = new Date();
+
+    if(lastSeen){
+      const newOnes = fetchedItems.filter(x => {
+        const created = x.created_at ? new Date(x.created_at) : null;
+        return created && created > lastSeen && (x.author || '반석') !== owner;
+      });
+      if(newOnes.length > 0){
+        showNotifyBanner(newOnes);
+      }
+    }
+    localStorage.setItem(LASTSEEN_KEY, nowTime.toISOString());
+  }
+
+  function showNotifyBanner(newOnes){
+    const banner = document.getElementById('notifyBanner');
+    const text = document.getElementById('notifyText');
+    const authorName = (newOnes[0].author === '종애') ? '종애공주님' : '바보석이';
+    let msg;
+    if(newOnes.length === 1){
+      const it = newOnes[0];
+      msg = `🔔 ${authorName}이(가) "${it.name}" ${won(it.amount)} 등록했어요`;
+    } else {
+      msg = `🔔 ${authorName}이(가) 새 내역 ${newOnes.length}건을 등록했어요`;
+    }
+    text.textContent = msg;
+    banner.style.display = 'flex';
+  }
+
+  document.getElementById('notifyClose').addEventListener('click', () => {
+    document.getElementById('notifyBanner').style.display = 'none';
+  });
+
   function populateCategoryOptions(){
     const typeEl = document.getElementById('fType');
     const catEl = document.getElementById('fCategory');
@@ -559,6 +737,7 @@
       const res = await fetch(`${TABLE_URL}?select=*&order=date.desc`, { headers: sbHeaders });
       if(!res.ok) throw new Error('load failed');
       items = await res.json();
+      checkNewEntries(items);
       note.textContent = '';
     }catch(e){
       note.textContent = '⚠️ 데이터를 불러오지 못했어요. 인터넷 연결과 URL/KEY를 확인해주세요';
@@ -638,10 +817,12 @@
           const row = document.createElement('div');
           row.className = 'row';
           const cat = item.category || (item.type==='income' ? '기타' : '기타');
+          const author = item.author || '반석';
+          const authorInitial = author === '종애' ? '종' : '반';
           row.innerHTML = `
             <span class="date">${fmtDate(item.date)}</span>
             <span class="name">${escapeHtml(item.name)}</span>
-            <span class="cat-cell"><span class="tag ${item.type}">${escapeHtml(cat)}</span></span>
+            <span class="cat-cell"><span class="tag ${item.type}">${escapeHtml(cat)}</span><span class="author-badge author-${author}" title="${escapeHtml(author)}">${authorInitial}</span></span>
             <span class="amount ${item.type}">${item.type==='income' ? '+' : '-'}${won(item.amount)}</span>
             <span class="memo">${escapeHtml(item.memo || '')}</span>
             <button class="del-btn" title="삭제" data-id="${item.id}">×</button>
@@ -714,6 +895,7 @@
     const catEl = document.getElementById('fCategory');
     const amountEl = document.getElementById('fAmount');
     const memoEl = document.getElementById('fMemo');
+    const authorEl = document.getElementById('fAuthor');
 
     const name = nameEl.value.trim();
     const amount = Number(amountEl.value);
@@ -729,7 +911,8 @@
       type: typeEl.value,
       category: catEl.value,
       amount,
-      memo: memoEl.value.trim()
+      memo: memoEl.value.trim(),
+      author: authorEl.value
     };
 
     // 새 항목의 달로 이동해서 바로 보여주기
@@ -751,6 +934,7 @@
   });
 
   populateCategoryOptions();
+  initOwnerModal();
   loadData();
 })();
 </script>
